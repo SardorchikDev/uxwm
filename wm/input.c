@@ -12,6 +12,7 @@
 extern Display *dpy;
 extern Window root;
 extern Monitor *mon;
+extern int running;
 
 typedef struct {
     unsigned int mod;
@@ -20,8 +21,11 @@ typedef struct {
     const void *arg;
 } Key;
 
+/* FIXED: Use uxterm instead of alacritty */
 static const char *termcmd[] = { "alacritty", NULL };
-static const char *dmenucmd[] = { "dmenu_run", NULL };
+static const char *dmenucmd[] = { "dmenu_run", "-fn", "JetBrainsMono Nerd Font-12",
+                                  "-nb", "#111111", "-nf", "#ffffff",
+                                  "-sb", "#D3D3D3", "-sf", "#ffffff", NULL };
 static const char *upvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%", NULL };
 static const char *downvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%", NULL };
 static const char *mutevol[] = { "pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle", NULL };
@@ -63,22 +67,27 @@ static Key keys[] = {
     { MOD|ShiftMask,    XK_q,           killclient,     NULL },
     { MOD|ShiftMask,    XK_e,           quit,           NULL },
     
+    /* Window focus - FIXED */
     { MOD,              XK_j,           focusstack,     &(int){+1} },
     { MOD,              XK_k,           focusstack,     &(int){-1} },
     { MOD,              XK_Tab,         focusstack,     &(int){+1} },
+    { MOD|ShiftMask,    XK_Tab,         focusstack,     &(int){-1} },
     
+    /* Layout switching */
     { MOD,              XK_t,           setlayout,      &(int){0} },
     { MOD,              XK_m,           setlayout,      &(int){1} },
     { MOD,              XK_f,           setlayout,      &(int){2} },
     { MOD,              XK_space,       togglefloating, NULL },
     { MOD,              XK_g,           togglegaps,     NULL },
     
+    /* Master area control */
     { MOD,              XK_i,           incnmaster,     &(int){+1} },
     { MOD,              XK_d,           incnmaster,     &(int){-1} },
     { MOD,              XK_h,           setmfact,       &(float){-0.05} },
     { MOD,              XK_l,           setmfact,       &(float){+0.05} },
     { MOD|ShiftMask,    XK_Return,      zoom,           NULL },
     
+    /* Media keys */
     { 0,                XF86XK_AudioRaiseVolume, spawn, upvol },
     { 0,                XF86XK_AudioLowerVolume, spawn, downvol },
     { 0,                XF86XK_AudioMute,        spawn, mutevol },

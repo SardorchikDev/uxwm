@@ -85,10 +85,13 @@ void setup(void)
     cursor[2] = XCreateFontCursor(dpy, XC_fleur);
 
     mon = ecalloc(1, sizeof(Monitor));
+    
+    /* FIXED: Set work area equal to monitor area - NO BAR OFFSET */
     mon->mx = mon->wx = 0;
     mon->my = mon->wy = 0;
     mon->mw = mon->ww = sw;
-    mon->mh = mon->wh = sh;
+    mon->mh = mon->wh = sh;  /* Full height, no bar reservation */
+    
     mon->nmaster = nmaster;
     mon->mfact = mfact;
     mon->sellt = 0;

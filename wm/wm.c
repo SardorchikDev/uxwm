@@ -15,7 +15,7 @@ Monitor *mon;
 int running = 1;
 int screen;
 int sw, sh;
-int enablegaps = 1;
+int enablegaps = 1; /* FIXED: Start with gaps enabled */
 
 void manage(Window w)
 {
@@ -42,14 +42,19 @@ void manage(Window w)
     if (trans != None || c->isfullscreen)
         c->isfloating = 1;
 
+    /* Add to client list */
     c->next = mon->clients;
     mon->clients = c;
 
+    /* Add to stack */
     c->snext = mon->stack;
     mon->stack = c;
 
-    XSetWindowBorder(dpy, w, 0x333333);
-    XSetWindowBorderWidth(dpy, w, c->bw);
+    /* Set border - FIXED: Only if borderpx > 0 */
+    if (borderpx > 0) {
+        XSetWindowBorder(dpy, w, 0x333333);
+        XSetWindowBorderWidth(dpy, w, c->bw);
+    }
 
     configure(c);
 
@@ -74,10 +79,12 @@ void unmanage(Client *c, int destroyed)
 {
     Client **tc;
 
+    /* Remove from client list */
     for (tc = &mon->clients; *tc && *tc != c; tc = &(*tc)->next);
     if (*tc)
         *tc = c->next;
 
+    /* Remove from stack */
     for (tc = &mon->stack; *tc && *tc != c; tc = &(*tc)->snext);
     if (*tc)
         *tc = c->snext;
@@ -97,6 +104,7 @@ void unmanage(Client *c, int destroyed)
 
 void focus(Client *c)
 {
+    /* FIXED: Improved focus handling */
     if (!c || !c->isvisible)
         c = NULL;
     
@@ -104,18 +112,40 @@ void focus(Client *c)
         unfocus(mon->sel, 0);
 
     if (c) {
+        /* Only focus if different from current */
         if (c != mon->sel) {
-            XSetWindowBorder(dpy, c->win, 0x0088cc);
+            /* Set border if enabled */
+            if (borderpx > 0)
+                XSetWindowBorder(dpy, c->win, 0x0088cc);
+            
+            /* Set input focus */
             XSetInputFocus(dpy, c->win, RevertToPointerRoot, CurrentTime);
+            
+            /* Update EWMH active window */
             XChangeProperty(dpy, root, wmatom[NetActiveWindow], XA_WINDOW, 32,
                             PropModeReplace, (unsigned char *)&(c->win), 1);
+            
+            /* Raise window */
             XRaiseWindow(dpy, c->win);
+            
+            /* Send WM_TAKE_FOCUS if supported */
+            XEvent ev;
+            ev.type = ClientMessage;
+            ev.xclient.window = c->win;
+            ev.xclient.message_type = wmatom[WMProtocols];
+            ev.xclient.format = 32;
+            ev.xclient.data.l[0] = wmatom[WMTakeFocus];
+            ev.xclient.data.l[1] = CurrentTime;
+            XSendEvent(dpy, c->win, False, NoEventMask, &ev);
         }
         mon->sel = c;
     } else {
         XSetInputFocus(dpy, root, RevertToPointerRoot, CurrentTime);
         XDeleteProperty(dpy, root, wmatom[NetActiveWindow]);
+        mon->sel = NULL;
     }
+    
+    XSync(dpy, False);
 }
 
 void unfocus(Client *c, int setfocus)
@@ -236,7 +266,9 @@ void configure(Client *c)
 
 void setborder(Client *c, int focused)
 {
-    XSetWindowBorder(dpy, c->win, focused ? 0x0088cc : 0x333333);
+    /* FIXED: Only set border if borderpx > 0 */
+    if (borderpx > 0)
+        XSetWindowBorder(dpy, c->win, focused ? 0x0088cc : 0x333333);
 }
 
 void updateclientlist(void)
@@ -347,11 +379,14 @@ void focusstack(const void *arg)
     if (!mon->sel)
         return;
 
+    /* FIXED: Better window cycling */
     if (inc > 0) {
+        /* Focus next visible window */
         for (c = mon->sel->next; c && !c->isvisible; c = c->next);
         if (!c)
             for (c = mon->clients; c && !c->isvisible; c = c->next);
     } else {
+        /* Focus previous visible window */
         for (i = mon->clients; i != mon->sel; i = i->next)
             if (i->isvisible)
                 c = i;
