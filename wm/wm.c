@@ -1,3 +1,4 @@
+
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -35,6 +36,7 @@ void manage(Window w)
     c->h = c->oldh = wa.height;
     c->bw = borderpx;
     c->isvisible = 1;
+    c->tags = mon->tagset[mon->seltags]; /* Assign to current tag */
 
     updatesizehints(c);
     updatewmhints(c);
@@ -161,6 +163,11 @@ void unfocus(Client *c, int setfocus)
 
 void arrange(Monitor *m)
 {
+    /* Update window visibility based on tags */
+    Client *c;
+    for (c = m->clients; c; c = c->next)
+        c->isvisible = c->tags & m->tagset[m->seltags];
+    
     if (m->lt[m->sellt])
         ((Layout *)m->lt[m->sellt])->arrange(m);
     restack(m);
@@ -457,4 +464,28 @@ void setlayout(const void *arg)
     if (i >= 0 && (unsigned int)i < LENGTH(layouts))
         mon->lt[mon->sellt] = &layouts[i];
     arrange(mon);
+}
+
+void view(const void *arg)
+{
+    unsigned int newtags = *(const unsigned int *)arg;
+    
+    if (newtags == mon->tagset[mon->seltags])
+        return;
+    
+    mon->seltags ^= 1; /* Toggle sel tagset */
+    if (newtags != ~0U)  /* Use ~0U for unsigned comparison */
+        mon->tagset[mon->seltags] = newtags;
+    
+    focus(NULL);
+    arrange(mon);
+}
+
+void tag(const void *arg)
+{
+    if (mon->sel && arg) {
+        mon->sel->tags = *(const unsigned int *)arg;
+        focus(NULL);
+        arrange(mon);
+    }
 }

@@ -23,14 +23,23 @@ typedef struct {
 
 /* FIXED: Use uxterm instead of alacritty */
 static const char *termcmd[] = { "alacritty", NULL };
-static const char *dmenucmd[] = { "dmenu_run", "-fn", "JetBrainsMono Nerd Font-12",
-                                  "-nb", "#111111", "-nf", "#ffffff",
-                                  "-sb", "#D3D3D3", "-sf", "#ffffff", NULL };
+static const char *dmenucmd[] = { "dmenu_run", NULL };
 static const char *upvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%", NULL };
 static const char *downvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%", NULL };
 static const char *mutevol[] = { "pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle", NULL };
 static const char *brightup[] = { "brightnessctl", "set", "10%+", NULL };
 static const char *brightdown[] = { "brightnessctl", "set", "10%-", NULL };
+
+/* Pre-defined tag arguments */
+static const unsigned int tag1 = 1 << 0;
+static const unsigned int tag2 = 1 << 1;
+static const unsigned int tag3 = 1 << 2;
+static const unsigned int tag4 = 1 << 3;
+static const unsigned int tag5 = 1 << 4;
+static const unsigned int tag6 = 1 << 5;
+static const unsigned int tag7 = 1 << 6;
+static const unsigned int tag8 = 1 << 7;
+static const unsigned int tag9 = 1 << 8;
 
 static void spawn(const void *arg)
 {
@@ -86,6 +95,26 @@ static Key keys[] = {
     { MOD,              XK_h,           setmfact,       &(float){-0.05} },
     { MOD,              XK_l,           setmfact,       &(float){+0.05} },
     { MOD|ShiftMask,    XK_Return,      zoom,           NULL },
+    
+    /* Workspace switching - FIXED with proper pointer syntax */
+    { MOD,              XK_1,           view,           &tag1 },
+    { MOD|ShiftMask,    XK_1,           tag,            &tag1 },
+    { MOD,              XK_2,           view,           &tag2 },
+    { MOD|ShiftMask,    XK_2,           tag,            &tag2 },
+    { MOD,              XK_3,           view,           &tag3 },
+    { MOD|ShiftMask,    XK_3,           tag,            &tag3 },
+    { MOD,              XK_4,           view,           &tag4 },
+    { MOD|ShiftMask,    XK_4,           tag,            &tag4 },
+    { MOD,              XK_5,           view,           &tag5 },
+    { MOD|ShiftMask,    XK_5,           tag,            &tag5 },
+    { MOD,              XK_6,           view,           &tag6 },
+    { MOD|ShiftMask,    XK_6,           tag,            &tag6 },
+    { MOD,              XK_7,           view,           &tag7 },
+    { MOD|ShiftMask,    XK_7,           tag,            &tag7 },
+    { MOD,              XK_8,           view,           &tag8 },
+    { MOD|ShiftMask,    XK_8,           tag,            &tag8 },
+    { MOD,              XK_9,           view,           &tag9 },
+    { MOD|ShiftMask,    XK_9,           tag,            &tag9 },
     
     /* Media keys */
     { 0,                XF86XK_AudioRaiseVolume, spawn, upvol },

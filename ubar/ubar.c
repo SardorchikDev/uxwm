@@ -1,100 +1,114 @@
 #include <X11/Xlib.h>
-#include <X11/Xutil.h>
+#include <X11/extensions/shape.h>
 #include <X11/Xft/Xft.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <string.h>
 
 #define BAR_HEIGHT 18
-#define BAR_GAP 15             
-#define FONT_NAME "JetBrainsMono Nerd Font:size=11"
+#define FONT_NAME "monospace:size=11"
+#define PADDING 10
+#define RADIUS 0  // rounded corner radius in px
 
-int main() {
-    Display *dpy = XOpenDisplay(NULL);
-    if (!dpy) {
-        fprintf(stderr, "Cannot open display\n");
-        return 1;
+int read_battery(void) {
+    FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+    int cap = -1;
+    if (f) {
+        fscanf(f, "%d", &cap);
+        fclose(f);
     }
+    return cap;
+}
+
+void apply_rounded_mask(Display *dpy, Window win, int width, int height, int radius) {
+    Pixmap mask = XCreatePixmap(dpy, win, width, height, 1);
+    GC gc = XCreateGC(dpy, mask, 0, NULL);
+    XSetForeground(dpy, gc, 0);
+    XFillRectangle(dpy, mask, gc, 0, 0, width, height);
+    XSetForeground(dpy, gc, 1);
+
+    // draw central rectangle
+    XFillRectangle(dpy, mask, gc, radius, 0, width - 2*radius, height);
+    XFillRectangle(dpy, mask, gc, 0, radius, width, height - 2*radius);
+
+    // draw corners (simple fill with arcs)
+    XFillArc(dpy, mask, gc, 0, 0, 2*radius, 2*radius, 0, 23040);
+    XFillArc(dpy, mask, gc, width - 2*radius, 0, 2*radius, 2*radius, 0, 23040);
+    XFillArc(dpy, mask, gc, 0, height - 2*radius, 2*radius, 2*radius, 0, 23040);
+    XFillArc(dpy, mask, gc, width - 2*radius, height - 2*radius, 2*radius, 2*radius, 0, 23040);
+
+    XShapeCombineMask(dpy, win, ShapeBounding, 0, 0, mask, ShapeSet);
+
+    XFreePixmap(dpy, mask);
+    XFreeGC(dpy, gc);
+}
+
+int main(void) {
+    Display *dpy = XOpenDisplay(NULL);
+    if (!dpy) return 1;
 
     int screen = DefaultScreen(dpy);
     int sw = DisplayWidth(dpy, screen);
     int sh = DisplayHeight(dpy, screen);
 
-    // --------------------------
-    // IMPORTANT: UXWM should reserve:
-    // usable_height = sh - (BAR_HEIGHT + BAR_GAP)
-    // --------------------------
+    XftFont *font = XftFontOpenName(dpy, screen, FONT_NAME);
+    if (!font) return 1;
 
-    // Create bottom bar window
+    XftColor fg;
+    XRenderColor white = {0xffff, 0xffff, 0xffff, 0xffff};
+    XftColorAllocValue(dpy, DefaultVisual(dpy, screen),
+                       DefaultColormap(dpy, screen), &white, &fg);
+
     Window win = XCreateSimpleWindow(
-        dpy,
-        RootWindow(dpy, screen),
-        0, sh - BAR_HEIGHT, // bar at bottom
-        sw, BAR_HEIGHT,
-        0,
-        BlackPixel(dpy, screen),
-        BlackPixel(dpy, screen)
+        dpy, RootWindow(dpy, screen),
+        0, 0, 1, BAR_HEIGHT,
+        0, 0, 0
     );
 
-    // Override redirect to prevent WM decorations
-    XSetWindowAttributes wa;
-    wa.override_redirect = True;
+    XSetWindowAttributes wa = { .override_redirect = True };
     XChangeWindowAttributes(dpy, win, CWOverrideRedirect, &wa);
-
-    XSelectInput(dpy, win, ExposureMask | ButtonPressMask);
     XMapRaised(dpy, win);
 
-    // Create Xft draw context
-    XftDraw *draw = XftDrawCreate(dpy, win, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen));
-    XftFont *font = XftFontOpenName(dpy, screen, FONT_NAME);
-    if (!font) {
-        fprintf(stderr, "Failed to load font: %s\n", FONT_NAME);
-        return 1;
-    }
+    XftDraw *draw = XftDrawCreate(dpy, win,
+                                  DefaultVisual(dpy, screen),
+                                  DefaultColormap(dpy, screen));
 
-    XftColor color;
-    XRenderColor renderColor = { .red=0xffff, .green=0xffff, .blue=0xffff, .alpha=0xffff };
-    XftColorAllocValue(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &renderColor, &color);
-
-    char time_str[64];
-    XEvent ev;
+    char text[64];
 
     while (1) {
-        // Handle expose events
-        while (XPending(dpy)) {
-            XNextEvent(dpy, &ev);
-            if (ev.type == Expose) {
-                // Redraw handled below
-            }
-        }
-
-        // Get current time
+        // build text
         time_t t = time(NULL);
-        struct tm *tm_info = localtime(&t);
-        strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
+        struct tm *tm = localtime(&t);
+        int bat = read_battery();
+        if (bat >= 0)
+            snprintf(text, sizeof(text), "%02d:%02d:%02d  |  BAT %d%%",
+                     tm->tm_hour, tm->tm_min, tm->tm_sec, bat);
+        else
+            snprintf(text, sizeof(text), "%02d:%02d:%02d",
+                     tm->tm_hour, tm->tm_min, tm->tm_sec);
 
-        // Clear bar
+        // measure text
+        XGlyphInfo ext;
+        XftTextExtentsUtf8(dpy, font, (XftChar8*)text, strlen(text), &ext);
+
+        int win_w = ext.width + PADDING * 2;
+        int win_x = (sw - win_w) / 2;
+        int win_y = sh - BAR_HEIGHT;
+
+        // resize and position window
+        XMoveResizeWindow(dpy, win, win_x, win_y, win_w, BAR_HEIGHT);
         XClearWindow(dpy, win);
 
-        // Measure text width for center alignment
-        XGlyphInfo extents;
-        XftTextExtentsUtf8(dpy, font, (XftChar8 *)time_str, strlen(time_str), &extents);
-        int x = (sw - extents.width) / 2;
-        int y = (BAR_HEIGHT + font->ascent - font->descent) / 2;
+        // apply rounded corners
+        apply_rounded_mask(dpy, win, win_w, BAR_HEIGHT, RADIUS);
 
-        // Draw time centered
-        XftDrawStringUtf8(draw, &color, font, x, y, (XftChar8 *)time_str, strlen(time_str));
+        // draw text
+        XftDrawStringUtf8(draw, &fg, font, PADDING, 14,
+                          (XftChar8*)text, strlen(text));
 
-        usleep(1000000); // update every second
+        XFlush(dpy);
+        sleep(1);
     }
-
-    // Cleanup
-    XftFontClose(dpy, font);
-    XftDrawDestroy(draw);
-    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &color);
-    XCloseDisplay(dpy);
-
-    return 0;
 }

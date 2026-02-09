@@ -21,6 +21,7 @@ struct Client {
     int isfullscreen;
     int isvisible;
     int isurgent;
+    unsigned int tags;  /* ADDED: Tag membership */
     Client *next;
     Client *snext;
 };
@@ -62,6 +63,8 @@ void incnmaster(const void *arg);
 void setmfact(const void *arg);
 void zoom(const void *arg);
 void setlayout(const void *arg);
+void view(const void *arg);      /* ADDED: Switch workspace */
+void tag(const void *arg);       /* ADDED: Move window to workspace */
 void updateclientlist(void);
 void updatewmhints(Client *c);
 void updatesizehints(Client *c);
