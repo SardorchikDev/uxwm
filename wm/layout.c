@@ -1,82 +1,44 @@
-#include <X11/Xlib.h>
+/* uxwm - layout functions */
 #include "wm.h"
-#include "layout.h"
-#include "config.h"
 
-void tile(Monitor *m)
+void
+tile(Monitor *m)
 {
-    Client *c;
-    int n = 0, i = 0;
-    int mw, my, ty;
-    int gap = enablegaps ? gappx : 0;
+	unsigned int i, n, h, mw, my, ty;
+	Client *c;
 
-    for (c = m->clients; c; c = c->next)
-        if (!c->isfloating && c->isvisible)
-            n++;
+	for (n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
+	if (n == 0) return;
 
-    if (n == 0)
-        return;
+	if (n > (unsigned int)m->nmaster)
+		mw = m->nmaster ? m->ww * m->mfact : 0;
+	else
+		mw = m->ww;
 
-    /* Calculate master width with gaps */
-    if (n > m->nmaster)
-        mw = m->nmaster ? (m->ww - gap) * m->mfact : 0;
-    else
-        mw = m->ww - 2 * gap;
-
-    /* Start positions with gap from edges */
-    my = ty = m->wy + gap;
-
-    for (c = m->clients; c; c = c->next) {
-        if (!c->isvisible || c->isfloating)
-            continue;
-
-        if (i < m->nmaster) {
-            /* Master window(s) - left side */
-            int h = (m->wh - my - gap) / (MIN(n, m->nmaster) - i);
-            resize(c, m->wx + gap, my, 
-                   mw - gap, 
-                   h - gap, 0);
-            my += h;
-        } else {
-            /* Stack window(s) - right side */
-            int h = (m->wh - ty - gap) / (n - i);
-            resize(c, m->wx + mw + gap, ty, 
-                   m->ww - mw - 2 * gap,
-                   h - gap, 0);
-            ty += h;
-        }
-        i++;
-    }
+	for (i = my = ty = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
+		if (i < (unsigned int)m->nmaster) {
+			h = (m->wh - my) / (MIN(n, (unsigned int)m->nmaster) - i);
+			resize(c, m->wx, m->wy + my, mw - (2*c->bw), h - (2*c->bw), 0);
+			if (my + HEIGHT(c) < m->wh)
+				my += HEIGHT(c);
+		} else {
+			h = (m->wh - ty) / (n - i);
+			resize(c, m->wx + mw, m->wy + ty, m->ww - mw - (2*c->bw), h - (2*c->bw), 0);
+			if (ty + HEIGHT(c) < m->wh)
+				ty += HEIGHT(c);
+		}
 }
 
-void monocle(Monitor *m)
+void
+monocle(Monitor *m)
 {
-    Client *c;
-    int n = 0;
-    int gap = enablegaps ? gappx : 0;
+	unsigned int n = 0;
+	Client *c;
 
-    for (c = m->clients; c; c = c->next)
-        if (!c->isfloating && c->isvisible)
-            n++;
-
-    if (n > 0) {
-        for (c = m->clients; c; c = c->next) {
-            if (!c->isvisible || c->isfloating)
-                continue;
-            /* Monocle with gaps around edges */
-            resize(c, m->wx + gap, m->wy + gap, 
-                   m->ww - 2 * gap, m->wh - 2 * gap, 0);
-        }
-    }
-}
-
-void floating(Monitor *m)
-{
-    Client *c;
-    for (c = m->clients; c; c = c->next) {
-        if (!c->isvisible)
-            continue;
-        if (!c->isfloating)
-            resize(c, c->x, c->y, c->w, c->h, 0);
-    }
+	for (c = m->clients; c; c = c->next)
+		if (ISVISIBLE(c)) n++;
+	if (n > 0)
+		snprintf(m->ltsymbol, sizeof m->ltsymbol, "[%d]", n);
+	for (c = nexttiled(m->clients); c; c = nexttiled(c->next))
+		resize(c, m->wx, m->wy, m->ww - 2 * c->bw, m->wh - 2 * c->bw, 0);
 }

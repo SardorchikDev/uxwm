@@ -1,153 +1,365 @@
-#include <X11/Xlib.h>
-#include <X11/keysym.h>
-#include <X11/XF86keysym.h>
-#include <unistd.h>
+/* uxwm - keyboard and mouse input commands */
+#include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "wm.h"
-#include "atoms.h"
-#include "util.h"
-#include "config.h"
-#include "layout.h"
 
-extern Display *dpy;
-extern Window root;
-extern Monitor *mon;
-extern int running;
-
-typedef struct {
-    unsigned int mod;
-    KeySym keysym;
-    void (*func)(const void *);
-    const void *arg;
-} Key;
-
-/* FIXED: Use uxterm instead of alacritty */
-static const char *termcmd[] = { "alacritty", NULL };
-static const char *dmenucmd[] = { "dmenu_run", NULL };
-static const char *upvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%", NULL };
-static const char *downvol[] = { "pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%", NULL };
-static const char *mutevol[] = { "pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle", NULL };
-static const char *brightup[] = { "brightnessctl", "set", "10%+", NULL };
-static const char *brightdown[] = { "brightnessctl", "set", "10%-", NULL };
-
-/* Pre-defined tag arguments */
-static const unsigned int tag1 = 1 << 0;
-static const unsigned int tag2 = 1 << 1;
-static const unsigned int tag3 = 1 << 2;
-static const unsigned int tag4 = 1 << 3;
-static const unsigned int tag5 = 1 << 4;
-static const unsigned int tag6 = 1 << 5;
-static const unsigned int tag7 = 1 << 6;
-static const unsigned int tag8 = 1 << 7;
-static const unsigned int tag9 = 1 << 8;
-
-static void spawn(const void *arg)
+/* ── key grabbing ────────────────────────────────────────────────────────── */
+void
+grabkeys(void)
 {
-    const char **cmd = (const char **)arg;
-    if (!cmd || !cmd[0])
-        return;
-    
-    if (fork() == 0) {
-        if (dpy)
-            close(ConnectionNumber(dpy));
-        setsid();
-        execvp(cmd[0], (char *const *)cmd);
-        die("uxwm: execvp %s failed", cmd[0]);
-    }
+	updatenumlockmask();
+	{
+		unsigned int i, j, k;
+		unsigned int modifiers[] = { 0, LockMask, numlockmask, numlockmask|LockMask };
+		int start, end, skip;
+		KeySym *syms;
+
+		XUngrabKey(dpy, AnyKey, AnyModifier, root);
+		XDisplayKeycodes(dpy, &start, &end);
+		syms = XGetKeyboardMapping(dpy, start, end - start + 1, &skip);
+		if (!syms) return;
+		for (k = start; k <= (unsigned int)end; k++)
+			for (i = 0; i < num_keys; i++)
+				if (keys[i].keysym == syms[(k - start) * skip])
+					for (j = 0; j < LENGTH(modifiers); j++)
+						XGrabKey(dpy, k,
+							keys[i].mod | modifiers[j],
+							root, True,
+							GrabModeAsync, GrabModeAsync);
+		XFree(syms);
+	}
 }
 
-static void quit(const void *arg)
+/* ── spawn ───────────────────────────────────────────────────────────────── */
+void
+spawn(const Arg *arg)
 {
-    (void)arg;
-    running = 0;
+	struct sigaction sa;
+
+	if (arg->v == (const void *)dmenucmd)
+		dmenumon[0] = '0' + selmon->num;
+	if (fork() == 0) {
+		if (dpy) close(ConnectionNumber(dpy));
+		setsid();
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags   = 0;
+		sa.sa_handler = SIG_DFL;
+		sigaction(SIGCHLD, &sa, NULL);
+		execvp(((char **)arg->v)[0], (char **)arg->v);
+		die("uxwm: execvp '%s' failed:", ((char **)arg->v)[0]);
+	}
 }
 
-static void togglegaps(const void *arg)
+/* ── quit ────────────────────────────────────────────────────────────────── */
+void
+quit(const Arg *arg)
 {
-    (void)arg;
-    enablegaps = !enablegaps;
-    arrange(mon);
+	(void)arg;
+	running = 0;
 }
 
-static Key keys[] = {
-    /* modifier         key             function        argument */
-    { MOD,              XK_Return,      spawn,          termcmd },
-    { MOD,              XK_p,           spawn,          dmenucmd },
-    { MOD|ShiftMask,    XK_q,           killclient,     NULL },
-    { MOD|ShiftMask,    XK_e,           quit,           NULL },
-    
-    /* Window focus - FIXED */
-    { MOD,              XK_j,           focusstack,     &(int){+1} },
-    { MOD,              XK_k,           focusstack,     &(int){-1} },
-    { MOD,              XK_Tab,         focusstack,     &(int){+1} },
-    { MOD|ShiftMask,    XK_Tab,         focusstack,     &(int){-1} },
-    
-    /* Layout switching */
-    { MOD,              XK_t,           setlayout,      &(int){0} },
-    { MOD,              XK_m,           setlayout,      &(int){1} },
-    { MOD,              XK_f,           setlayout,      &(int){2} },
-    { MOD,              XK_space,       togglefloating, NULL },
-    { MOD,              XK_g,           togglegaps,     NULL },
-    
-    /* Master area control */
-    { MOD,              XK_i,           incnmaster,     &(int){+1} },
-    { MOD,              XK_d,           incnmaster,     &(int){-1} },
-    { MOD,              XK_h,           setmfact,       &(float){-0.05} },
-    { MOD,              XK_l,           setmfact,       &(float){+0.05} },
-    { MOD|ShiftMask,    XK_Return,      zoom,           NULL },
-    
-    /* Workspace switching - FIXED with proper pointer syntax */
-    { MOD,              XK_1,           view,           &tag1 },
-    { MOD|ShiftMask,    XK_1,           tag,            &tag1 },
-    { MOD,              XK_2,           view,           &tag2 },
-    { MOD|ShiftMask,    XK_2,           tag,            &tag2 },
-    { MOD,              XK_3,           view,           &tag3 },
-    { MOD|ShiftMask,    XK_3,           tag,            &tag3 },
-    { MOD,              XK_4,           view,           &tag4 },
-    { MOD|ShiftMask,    XK_4,           tag,            &tag4 },
-    { MOD,              XK_5,           view,           &tag5 },
-    { MOD|ShiftMask,    XK_5,           tag,            &tag5 },
-    { MOD,              XK_6,           view,           &tag6 },
-    { MOD|ShiftMask,    XK_6,           tag,            &tag6 },
-    { MOD,              XK_7,           view,           &tag7 },
-    { MOD|ShiftMask,    XK_7,           tag,            &tag7 },
-    { MOD,              XK_8,           view,           &tag8 },
-    { MOD|ShiftMask,    XK_8,           tag,            &tag8 },
-    { MOD,              XK_9,           view,           &tag9 },
-    { MOD|ShiftMask,    XK_9,           tag,            &tag9 },
-    
-    /* Media keys */
-    { 0,                XF86XK_AudioRaiseVolume, spawn, upvol },
-    { 0,                XF86XK_AudioLowerVolume, spawn, downvol },
-    { 0,                XF86XK_AudioMute,        spawn, mutevol },
-    { 0,                XF86XK_MonBrightnessUp,  spawn, brightup },
-    { 0,                XF86XK_MonBrightnessDown,spawn, brightdown },
-};
-
-void grabkeys(void)
+/* ── kill client ─────────────────────────────────────────────────────────── */
+void
+killclient(const Arg *arg)
 {
-    unsigned int i;
-    KeyCode code;
-
-    XUngrabKey(dpy, AnyKey, AnyModifier, root);
-    
-    for (i = 0; i < LENGTH(keys); i++) {
-        if ((code = XKeysymToKeycode(dpy, keys[i].keysym)))
-            XGrabKey(dpy, code, keys[i].mod, root, True, GrabModeAsync, GrabModeAsync);
-    }
+	(void)arg;
+	if (!selmon->sel) return;
+	if (!sendevent(selmon->sel, wmatom[WMDelete])) {
+		XGrabServer(dpy);
+		XSetErrorHandler(xerrordummy);
+		XSetCloseDownMode(dpy, DestroyAll);
+		XKillClient(dpy, selmon->sel->win);
+		XSync(dpy, False);
+		XSetErrorHandler(xerror);
+		XUngrabServer(dpy);
+	}
 }
 
-void handle_keypress(XEvent *e)
+/* ── focus stack ─────────────────────────────────────────────────────────── */
+void
+focusstack(const Arg *arg)
 {
-    unsigned int i;
-    KeySym keysym = XLookupKeysym(&e->xkey, 0);
+	Client *c = NULL, *i;
 
-    for (i = 0; i < LENGTH(keys); i++) {
-        if (keysym == keys[i].keysym && 
-            keys[i].mod == e->xkey.state &&
-            keys[i].func) {
-            keys[i].func(keys[i].arg);
-            return;
-        }
-    }
+	if (!selmon->sel || (selmon->sel->isfullscreen && lockfullscreen))
+		return;
+	if (arg->i > 0) {
+		for (c = selmon->sel->next; c && !ISVISIBLE(c); c = c->next);
+		if (!c)
+			for (c = selmon->clients; c && !ISVISIBLE(c); c = c->next);
+	} else {
+		for (i = selmon->clients; i != selmon->sel; i = i->next)
+			if (ISVISIBLE(i)) c = i;
+		if (!c)
+			for (; i; i = i->next)
+				if (ISVISIBLE(i)) c = i;
+	}
+	if (c) {
+		focus(c);
+		restack(selmon);
+	}
+}
+
+/* ── focus monitor ───────────────────────────────────────────────────────── */
+void
+focusmon(const Arg *arg)
+{
+	Monitor *m;
+	if (!mons->next) return;
+	if ((m = dirtomon(arg->i)) == selmon) return;
+	unfocus(selmon->sel, 0);
+	selmon = m;
+	focus(NULL);
+}
+
+/* ── inc nmaster ─────────────────────────────────────────────────────────── */
+void
+incnmaster(const Arg *arg)
+{
+	selmon->nmaster = MAX(selmon->nmaster + arg->i, 0);
+	arrange(selmon);
+}
+
+/* ── set mfact ───────────────────────────────────────────────────────────── */
+void
+setmfact(const Arg *arg)
+{
+	float f;
+	if (!arg || !selmon->lt[selmon->sellt]->arrange) return;
+	f = arg->f < 1.0 ? arg->f + selmon->mfact : arg->f - 1.0;
+	if (f < 0.05 || f > 0.95) return;
+	selmon->mfact = f;
+	arrange(selmon);
+}
+
+/* ── set layout ──────────────────────────────────────────────────────────── */
+void
+setlayout(const Arg *arg)
+{
+	if (!arg || !arg->v || arg->v != selmon->lt[selmon->sellt])
+		selmon->sellt ^= 1;
+	if (arg && arg->v)
+		selmon->lt[selmon->sellt] = (Layout *)arg->v;
+	strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol, sizeof selmon->ltsymbol);
+	if (selmon->sel) arrange(selmon);
+	else             drawbar(selmon);
+}
+
+/* ── toggle bar ──────────────────────────────────────────────────────────── */
+void
+togglebar(const Arg *arg)
+{
+	(void)arg;
+	selmon->showbar = !selmon->showbar;
+	updatebarpos(selmon);
+	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
+	arrange(selmon);
+}
+
+/* ── toggle floating ─────────────────────────────────────────────────────── */
+void
+togglefloating(const Arg *arg)
+{
+	(void)arg;
+	if (!selmon->sel) return;
+	if (selmon->sel->isfullscreen) return;
+	selmon->sel->isfloating = !selmon->sel->isfloating || selmon->sel->isfixed;
+	if (selmon->sel->isfloating)
+		resize(selmon->sel, selmon->sel->x, selmon->sel->y,
+			selmon->sel->w, selmon->sel->h, 0);
+	arrange(selmon);
+}
+
+/* ── view / tag operations ───────────────────────────────────────────────── */
+void
+view(const Arg *arg)
+{
+	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
+		return;
+	selmon->seltags ^= 1;
+	if (arg->ui & TAGMASK)
+		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
+	focus(NULL);
+	arrange(selmon);
+}
+
+void
+toggleview(const Arg *arg)
+{
+	unsigned int newtagset = selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK);
+	if (newtagset) {
+		selmon->tagset[selmon->seltags] = newtagset;
+		focus(NULL);
+		arrange(selmon);
+	}
+}
+
+void
+tag(const Arg *arg)
+{
+	if (selmon->sel && arg->ui & TAGMASK) {
+		selmon->sel->tags = arg->ui & TAGMASK;
+		focus(NULL);
+		arrange(selmon);
+	}
+}
+
+void
+toggletag(const Arg *arg)
+{
+	unsigned int newtags;
+	if (!selmon->sel) return;
+	newtags = selmon->sel->tags ^ (arg->ui & TAGMASK);
+	if (newtags) {
+		selmon->sel->tags = newtags;
+		focus(NULL);
+		arrange(selmon);
+	}
+}
+
+void
+tagmon(const Arg *arg)
+{
+	if (!selmon->sel || !mons->next) return;
+	sendmon(selmon->sel, dirtomon(arg->i));
+}
+
+/* ── zoom (swap with master) ─────────────────────────────────────────────── */
+void
+zoom(const Arg *arg)
+{
+	(void)arg;
+	Client *c = selmon->sel;
+	if (!selmon->lt[selmon->sellt]->arrange || !c || c->isfloating) return;
+	if (c == nexttiled(selmon->clients) && !(c = nexttiled(c->next))) return;
+	pop(c);
+}
+
+/* ── mouse move ──────────────────────────────────────────────────────────── */
+void
+movemouse(const Arg *arg)
+{
+	(void)arg;
+	int x, y, ocx, ocy, nx, ny;
+	Client *c;
+	Monitor *m;
+	XEvent ev;
+	Time lasttime = 0;
+
+	if (!(c = selmon->sel)) return;
+	if (c->isfullscreen) return;
+	restack(selmon);
+	ocx = c->x; ocy = c->y;
+	if (XGrabPointer(dpy, root, False, MOUSEMASK, GrabModeAsync, GrabModeAsync,
+		None, cursor[CurMove]->cursor, CurrentTime) != GrabSuccess)
+		return;
+	if (!getrootptr(&x, &y)) return;
+	do {
+		XMaskEvent(dpy, MOUSEMASK|ExposureMask|SubstructureRedirectMask, &ev);
+		switch (ev.type) {
+		case ConfigureRequest:
+		case Expose:
+		case MapRequest:
+			/* re-run handlers for these during drag */
+			if (ev.type == Expose) {
+				Monitor *em;
+				if (ev.xexpose.count == 0 && (em = wintomon(ev.xexpose.window)))
+					drawbar(em);
+			} else if (ev.type == MapRequest) {
+				static XWindowAttributes wa;
+				if (!XGetWindowAttributes(dpy, ev.xmaprequest.window, &wa) || wa.override_redirect)
+					break;
+				if (!wintoclient(ev.xmaprequest.window))
+					manage(ev.xmaprequest.window, &wa);
+			}
+			break;
+		case MotionNotify:
+			if ((ev.xmotion.time - lasttime) <= (unsigned long)(1000 / refreshrate))
+				continue;
+			lasttime = ev.xmotion.time;
+			nx = ocx + (ev.xmotion.x - x);
+			ny = ocy + (ev.xmotion.y - y);
+			if (abs(selmon->wx - nx) < (int)snap)
+				nx = selmon->wx;
+			else if (abs((selmon->wx + selmon->ww) - (nx + WIDTH(c))) < (int)snap)
+				nx = selmon->wx + selmon->ww - WIDTH(c);
+			if (abs(selmon->wy - ny) < (int)snap)
+				ny = selmon->wy;
+			else if (abs((selmon->wy + selmon->wh) - (ny + HEIGHT(c))) < (int)snap)
+				ny = selmon->wy + selmon->wh - HEIGHT(c);
+			if (!c->isfloating && selmon->lt[selmon->sellt]->arrange
+			&& (abs(nx - c->x) > (int)snap || abs(ny - c->y) > (int)snap))
+				togglefloating(NULL);
+			if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
+				resize(c, nx, ny, c->w, c->h, 1);
+			break;
+		}
+	} while (ev.type != ButtonRelease);
+	XUngrabPointer(dpy, CurrentTime);
+	if ((m = recttomon(c->x, c->y, c->w, c->h)) != selmon) {
+		sendmon(c, m);
+		selmon = m;
+		focus(NULL);
+	}
+}
+
+/* ── mouse resize ────────────────────────────────────────────────────────── */
+void
+resizemouse(const Arg *arg)
+{
+	(void)arg;
+	int ocx, ocy, nw, nh;
+	Client *c;
+	Monitor *m;
+	XEvent ev;
+	Time lasttime = 0;
+
+	if (!(c = selmon->sel)) return;
+	if (c->isfullscreen) return;
+	restack(selmon);
+	ocx = c->x; ocy = c->y;
+	if (XGrabPointer(dpy, root, False, MOUSEMASK, GrabModeAsync, GrabModeAsync,
+		None, cursor[CurResize]->cursor, CurrentTime) != GrabSuccess)
+		return;
+	XWarpPointer(dpy, None, c->win, 0, 0, 0, 0, c->w + c->bw - 1, c->h + c->bw - 1);
+	do {
+		XMaskEvent(dpy, MOUSEMASK|ExposureMask|SubstructureRedirectMask, &ev);
+		switch (ev.type) {
+		case ConfigureRequest:
+		case Expose:
+		case MapRequest:
+			if (ev.type == Expose) {
+				Monitor *em;
+				if (ev.xexpose.count == 0 && (em = wintomon(ev.xexpose.window)))
+					drawbar(em);
+			}
+			break;
+		case MotionNotify:
+			if ((ev.xmotion.time - lasttime) <= (unsigned long)(1000 / refreshrate))
+				continue;
+			lasttime = ev.xmotion.time;
+			nw = MAX(ev.xmotion.x - ocx - 2 * c->bw + 1, 1);
+			nh = MAX(ev.xmotion.y - ocy - 2 * c->bw + 1, 1);
+			if (c->mon->wx + nw >= selmon->wx && c->mon->wx + nw <= selmon->wx + selmon->ww
+			&&  c->mon->wy + nh >= selmon->wy && c->mon->wy + nh <= selmon->wy + selmon->wh) {
+				if (!c->isfloating && selmon->lt[selmon->sellt]->arrange
+				&& (abs(nw - c->w) > (int)snap || abs(nh - c->h) > (int)snap))
+					togglefloating(NULL);
+			}
+			if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
+				resize(c, c->x, c->y, nw, nh, 1);
+			break;
+		}
+	} while (ev.type != ButtonRelease);
+	XWarpPointer(dpy, None, c->win, 0, 0, 0, 0, c->w + c->bw - 1, c->h + c->bw - 1);
+	XUngrabPointer(dpy, CurrentTime);
+	while (XCheckMaskEvent(dpy, EnterWindowMask, &ev));
+	if ((m = recttomon(c->x, c->y, c->w, c->h)) != selmon) {
+		sendmon(c, m);
+		selmon = m;
+		focus(NULL);
+	}
 }
