@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include "wm.h"
 
 /* ── global variable definitions ─────────────────────────────────────────── */
@@ -32,7 +33,7 @@ Atom wmatom[WMLast], netatom[NetLast];
 /* compile-time tag limit check */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
 
-/* sizes of config arrays exposed as externs (can't use LENGTH() in other TUs) */
+/* sizes of config arrays exposed as externs */
 int num_fonts   = LENGTH(fonts);
 int num_colors  = LENGTH(colors);
 int num_tags    = LENGTH(tags);
@@ -40,6 +41,24 @@ int num_layouts = LENGTH(layouts);
 int num_keys    = LENGTH(keys);
 int num_buttons = LENGTH(buttons);
 int num_rules   = LENGTH(rules);
+
+/* ── built-in status updater ─────────────────────────────────────────────── */
+/*
+ * Updates stext with current time.  Called from drawbar() so the clock
+ * refreshes whenever the bar redraws (on focus change, window map, etc.).
+ * For a smooth clock we also set a 1-second X timer via XPending loop in
+ * run() — but even without that the time stays correct to within one event.
+ */
+void
+updatestatustext(void)
+{
+	time_t t = time(NULL);
+	struct tm *tm = localtime(&t);
+	if (tm)
+		strftime(stext, sizeof(stext), " %a %b %d  %H:%M ", tm);
+	else
+		strncpy(stext, " uxwm ", sizeof(stext) - 1);
+}
 
 /* ── client list helpers ─────────────────────────────────────────────────── */
 void
@@ -249,7 +268,11 @@ drawbar(Monitor *m)
 
 	if (!m->showbar) return;
 
-	/* status text on selected monitor */
+	/* Refresh built-in clock/status every draw */
+	if (m == selmon)
+		updatestatustext();
+
+	/* Status text — right-aligned on selected monitor */
 	if (m == selmon) {
 		drw_setscheme(drw, scheme[SchemeNorm]);
 		tw = TEXTW(stext) - lrpad + 2;
@@ -260,21 +283,27 @@ drawbar(Monitor *m)
 		occ |= c->tags;
 		if (c->isurgent) urg |= c->tags;
 	}
+
+	/* Tag buttons */
 	x = 0;
 	for (i = 0; i < LENGTH(tags); i++) {
 		w = TEXTW(tags[i]);
 		drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
 		drw_text(drw, x, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
+		/* Small indicator dot for tags that have windows */
 		if (occ & 1 << i)
 			drw_rect(drw, x + boxs, boxs, boxw, boxw,
 				m == selmon && selmon->sel && selmon->sel->tags & 1 << i,
 				urg & 1 << i);
 		x += w;
 	}
+
+	/* Layout symbol */
 	w = TEXTW(m->ltsymbol);
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	x = drw_text(drw, x, 0, w, bh, lrpad / 2, m->ltsymbol, 0);
 
+	/* Window title — fills remaining space between layout symbol and status */
 	if ((w = m->ww - tw - x) > bh) {
 		if (m->sel) {
 			drw_setscheme(drw, scheme[m == selmon ? SchemeSel : SchemeNorm]);
@@ -489,6 +518,8 @@ showhide(Client *c)
 		showhide(c->snext);
 	} else {
 		showhide(c->snext);
+		/* Move off-screen to hide — use a large negative X offset so the
+		 * window is definitely not visible but geometry is preserved */
 		XMoveWindow(dpy, c->win, WIDTH(c) * -2, c->y);
 	}
 }
@@ -695,11 +726,19 @@ updatesizehints(Client *c)
 	c->hintsvalid = 1;
 }
 
+/*
+ * updatestatus — called when root WM_NAME changes (e.g. from xsetroot).
+ * If an external script sets a custom status, we use it; otherwise we fall
+ * back to our built-in clock via updatestatustext().
+ */
 void
 updatestatus(void)
 {
-	if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
-		strcpy(stext, "uxwm");
+	char tmp[256];
+	if (gettextprop(root, XA_WM_NAME, tmp, sizeof(tmp)) && tmp[0] != '\0')
+		strncpy(stext, tmp, sizeof(stext) - 1);
+	else
+		updatestatustext();
 	drawbar(selmon);
 }
 

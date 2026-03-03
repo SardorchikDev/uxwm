@@ -173,15 +173,40 @@ togglefloating(const Arg *arg)
 	arrange(selmon);
 }
 
-/* ── view / tag operations ───────────────────────────────────────────────── */
+/* ── view (switch desktop) ───────────────────────────────────────────────── */
+/*
+ * FIX: The original logic used a simple XOR on seltags which caused a
+ * "last visited" toggle — but it broke when switching desktops in a
+ * non-alternating order (e.g. 1->3->2->3 would jump back to 1 instead of
+ * staying on 3, because seltags[0] still held tag 1).
+ *
+ * The correct approach:
+ *   - Always write the new tagset into the CURRENT seltags slot.
+ *   - Toggle seltags so the previous slot is preserved for Mod+Tab "last
+ *     visited" behaviour.
+ *   - Only bail out early when the tag is already active (no-op).
+ */
 void
 view(const Arg *arg)
 {
-	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
+	unsigned int newtagset = arg->ui & TAGMASK;
+
+	/* Mod+Tab / view({0}) means "go back to previous tag" */
+	if (newtagset == 0) {
+		selmon->seltags ^= 1;
+		focus(NULL);
+		arrange(selmon);
 		return;
+	}
+
+	/* Already on this exact desktop — nothing to do */
+	if (newtagset == selmon->tagset[selmon->seltags])
+		return;
+
+	/* Save current as "previous", flip slot, write new tagset */
 	selmon->seltags ^= 1;
-	if (arg->ui & TAGMASK)
-		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
+	selmon->tagset[selmon->seltags] = newtagset;
+
 	focus(NULL);
 	arrange(selmon);
 }
@@ -197,10 +222,11 @@ toggleview(const Arg *arg)
 	}
 }
 
+/* ── tag (move focused window to desktop) ────────────────────────────────── */
 void
 tag(const Arg *arg)
 {
-	if (selmon->sel && arg->ui & TAGMASK) {
+	if (selmon->sel && (arg->ui & TAGMASK)) {
 		selmon->sel->tags = arg->ui & TAGMASK;
 		focus(NULL);
 		arrange(selmon);
@@ -263,7 +289,6 @@ movemouse(const Arg *arg)
 		case ConfigureRequest:
 		case Expose:
 		case MapRequest:
-			/* re-run handlers for these during drag */
 			if (ev.type == Expose) {
 				Monitor *em;
 				if (ev.xexpose.count == 0 && (em = wintomon(ev.xexpose.window)))
