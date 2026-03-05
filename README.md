@@ -1,4 +1,4 @@
-# uxwm
+# uxwm - unifined x11 window manager
 
 A minimal X11 window manager. Tiling, floating, and monocle layouts.
 Built-in status bar. 9 workspaces. No dependencies beyond Xlib, Xft, and Xinerama.
