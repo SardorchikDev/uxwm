@@ -1,124 +1,71 @@
-#!/bin/bash
-# UX Ecosystem Installer
+#!/bin/sh
+# install.sh - build and install uxwm plus helper scripts
 
-set -e
-
-echo "============================================"
-echo "  UX Ecosystem Installer"
-echo "  Better than dwm. Built from scratch."
-echo "============================================"
-echo ""
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-print_status() {
-    echo -e "${GREEN}==>${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}Error:${NC} $1" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}Warning:${NC} $1"
-}
-
-check_dependencies() {
-    print_status "Checking dependencies..."
-    
-    local missing=""
-    
-    command -v cc >/dev/null 2>&1 || missing="$missing gcc/clang"
-    command -v make >/dev/null 2>&1 || missing="$missing make"
-    
-    if ! pkg-config --exists x11 2>/dev/null; then
-        missing="$missing libx11-dev"
-    fi
-    
-    if [ -n "$missing" ]; then
-        print_error "Missing dependencies:$missing"
-        echo ""
-        echo "Install on Arch: sudo pacman -S base-devel libx11 libxinerama libxcomposite libxdamage libxrender"
-        echo "Install on Debian/Ubuntu: sudo apt install build-essential libx11-dev libxinerama-dev libxcomposite-dev libxdamage-dev libxrender-dev"
-        exit 1
-    fi
-    
-    print_status "All dependencies satisfied!"
-}
+set -eu
 
 PREFIX="${PREFIX:-/usr/local}"
-BINDIR="$PREFIX/bin"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/uxwm"
+missing=""
 
-if [ "$PREFIX" = "/usr/local" ] && [ "$EUID" -ne 0 ]; then
-    print_warning "Not running as root. Installing to $HOME/.local"
-    PREFIX="$HOME/.local"
-    BINDIR="$PREFIX/bin"
-fi
+say() {
+    printf '%s\n' "$1"
+}
 
-mkdir -p "$BINDIR"
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || missing="$missing $1"
+}
 
-check_dependencies
-echo ""
+require_pkg() {
+    pkg-config --exists "$1" 2>/dev/null || missing="$missing $1"
+}
 
-print_status "Building all components..."
-make clean
-make all
+require_cmd cc
+require_cmd make
+require_cmd pkg-config
+require_pkg x11
+require_pkg xinerama
+require_pkg xft
+require_pkg fontconfig
 
-if [ $? -eq 0 ]; then
-    print_status "Build successful!"
-else
-    print_error "Build failed"
+if [ -n "$missing" ]; then
+    say "Missing build dependencies:$missing"
+    say "Arch: sudo pacman -S base-devel libx11 libxinerama libxft fontconfig dmenu"
+    say "Debian/Ubuntu: sudo apt install build-essential libx11-dev libxinerama-dev libxft-dev libfontconfig-dev suckless-tools"
     exit 1
 fi
 
-print_status "Installing to $BINDIR..."
+if [ "$PREFIX" = "/usr/local" ] && [ "$(id -u)" -ne 0 ]; then
+    PREFIX="$HOME/.local"
+    say "Installing without root; using PREFIX=$PREFIX"
+fi
+
+say "Building uxwm..."
+make clean
+make
+
+say "Installing to $PREFIX/bin..."
 make PREFIX="$PREFIX" install
 
-print_status "Creating configuration directory..."
-mkdir -p "$HOME/.config/ux"
+mkdir -p "$CONFIG_DIR"
 
-if [ ! -f "$HOME/.config/ux/autostart" ]; then
-    cat > "$HOME/.config/ux/autostart" << 'EOF'
+if [ ! -f "$CONFIG_DIR/autostart" ]; then
+    cat >"$CONFIG_DIR/autostart" <<'EOF'
 #!/bin/sh
-# UX Autostart - Add your startup applications here
-
-# Example: Start compositor
-# uxcomp &
-
-# Example: Set wallpaper
+# Start background applications here.
+# Example:
+# nm-applet &
 # feh --bg-scale ~/Pictures/wallpaper.jpg &
 EOF
-    chmod +x "$HOME/.config/ux/autostart"
+    chmod +x "$CONFIG_DIR/autostart"
 fi
 
 if [ ! -f "$HOME/.xinitrc" ]; then
-    print_status "Creating .xinitrc..."
-    cat > "$HOME/.xinitrc" << 'EOF'
+    cat >"$HOME/.xinitrc" <<'EOF'
 #!/bin/sh
 exec ux-session
 EOF
+    chmod +x "$HOME/.xinitrc"
 fi
 
-echo ""
-echo "============================================"
-echo -e "${GREEN}Installation complete!${NC}"
-echo "============================================"
-echo ""
-echo "Components installed:"
-[ -f "$BINDIR/uxwm" ] && echo "  ✓ uxwm - Window Manager"
-[ -f "$BINDIR/uxterm" ] && echo "  ✓ uxterm - Terminal Emulator"
-[ -f "$BINDIR/uxmenu" ] && echo "  ✓ uxmenu - Application Launcher"
-[ -f "$BINDIR/uxcomp" ] && echo "  ✓ uxcomp - Compositor"
-echo ""
-echo "To start using UX:"
-echo "  1. Run: startx"
-echo "  2. Or select 'UX Desktop' from your login manager"
-echo ""
-echo "Keybindings:"
-echo "  Mod + Return  - Terminal"
-echo "  Mod + p       - Application launcher"
-echo "  Mod + Shift + e - Quit"
-echo ""
+say "Install complete."
+say "Runtime tools used by the default config: st, firefox, pamixer, brightnessctl, scrot, dmenu."

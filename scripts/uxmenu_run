@@ -1,32 +1,23 @@
 #!/bin/sh
-# uxmenu_run - Smart application launcher for UX ecosystem
+# uxmenu_run - optional launcher wrapper for uxwm
 
-cachedir="${XDG_CACHE_HOME:-$HOME/.cache}"
-cache="$cachedir/uxmenu_run"
+set -eu
 
-mkdir -p "$cachedir"
-
-if [ ! -f "$cache" ] || [ -n "$(find /usr/share/applications -newer "$cache" 2>/dev/null)" ]; then
-    (
-        find /usr/share/applications /usr/local/share/applications \
-             ~/.local/share/applications -name "*.desktop" 2>/dev/null | \
-        while read -r desktop; do
-            name=$(grep "^Name=" "$desktop" | head -1 | cut -d= -f2)
-            exec=$(grep "^Exec=" "$desktop" | head -1 | cut -d= -f2 | sed 's/ %.//g')
-            [ -n "$name" ] && [ -n "$exec" ] && echo "$name:$exec"
-        done
-        
-        IFS=:
-        for dir in $PATH; do
-            [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f -executable \
-                -printf "%f:%f\n" 2>/dev/null
-        done
-    ) | sort -u > "$cache"
+if command -v dmenu_run >/dev/null 2>&1; then
+    exec dmenu_run "$@"
 fi
 
-sel=$(cut -d: -f1 < "$cache" | uxmenu "$@")
-
-if [ -n "$sel" ]; then
-    cmd=$(grep "^$sel:" "$cache" | cut -d: -f2- | head -1)
-    exec $cmd &
+if ! command -v dmenu >/dev/null 2>&1; then
+    echo "uxmenu_run: requires dmenu or dmenu_run in PATH" >&2
+    exit 1
 fi
+
+cmd=$(
+    IFS=:
+    for dir in $PATH; do
+        [ -d "$dir" ] || continue
+        find "$dir" -maxdepth 1 -type f -perm -111 -printf '%f\n' 2>/dev/null
+    done | sort -u | dmenu "$@"
+)
+
+[ -n "$cmd" ] && exec "$cmd"

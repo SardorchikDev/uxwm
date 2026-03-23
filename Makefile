@@ -4,6 +4,7 @@ VERSION = 1.0
 PREFIX  = /usr/local
 BINDIR  = $(PREFIX)/bin
 MANDIR  = $(PREFIX)/share/man/man1
+SCRIPTS = scripts/ux-session scripts/uxmenu_run
 
 CC      = cc
 INCS    = -I/usr/include -I/usr/include/freetype2
@@ -62,10 +63,10 @@ clean:
 install: uxwm
 	@echo "  INSTALL $(BINDIR)/uxwm"
 	@mkdir -p $(DESTDIR)$(BINDIR)
-	@cp -f uxwm $(DESTDIR)$(BINDIR)
-	@chmod 755 $(DESTDIR)$(BINDIR)/uxwm
+	@cp -f uxwm $(SCRIPTS) $(DESTDIR)$(BINDIR)
+	@chmod 755 $(DESTDIR)$(BINDIR)/uxwm $(DESTDIR)$(BINDIR)/ux-session $(DESTDIR)$(BINDIR)/uxmenu_run
 
 uninstall:
-	@rm -f $(DESTDIR)$(BINDIR)/uxwm
+	@rm -f $(DESTDIR)$(BINDIR)/uxwm $(DESTDIR)$(BINDIR)/ux-session $(DESTDIR)$(BINDIR)/uxmenu_run
 
 .PHONY: all clean install uninstall

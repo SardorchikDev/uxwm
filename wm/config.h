@@ -4,6 +4,7 @@
 
 /* appearance */
 unsigned int borderpx  = 2;
+unsigned int gappx     = 10;
 unsigned int snap      = 32;
 int showbar            = 1;
 int topbar             = 1;
@@ -111,9 +112,11 @@ const Key keys[] = {
     { MODKEY,                XK_d,                     incnmaster,     {.i = -1 } },
     { MODKEY,                XK_h,                     setmfact,       {.f = -0.05} },
     { MODKEY,                XK_l,                     setmfact,       {.f = +0.05} },
+    { MODKEY,                XK_g,                     togglegaps,     {0} },
     { MODKEY|ShiftMask,      XK_Return,                zoom,           {0} },
     { MODKEY,                XK_Tab,                   view,           {0} },
     { MODKEY|ShiftMask,      XK_c,                     killclient,     {0} },
+    { MODKEY|ShiftMask,      XK_f,                     togglefullscreen,{0} },
     { MODKEY|ShiftMask,      XK_space,                 togglefloating, {0} },
 
     /* layouts */

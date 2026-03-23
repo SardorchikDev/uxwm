@@ -1,68 +1,36 @@
 #!/bin/sh
-# ux-session - Launch complete UX ecosystem
+# ux-session - launch uxwm with optional user hooks
 
-UXTERM="${UXTERM:-uxterm}"
-UXCOMP="${UXCOMP:-uxcomp}"
+set -eu
+
 UXWM="${UXWM:-uxwm}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/uxwm"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/uxwm"
+AUTOSTART="$CONFIG_DIR/autostart"
+STATUS_SCRIPT="$CONFIG_DIR/status.sh"
 
-export TERM=xterm-256color
+mkdir -p "$DATA_DIR"
+exec >"$DATA_DIR/session.log" 2>&1
 
-logdir="${XDG_DATA_HOME:-$HOME/.local/share}/ux"
-mkdir -p "$logdir"
-exec > "$logdir/session.log" 2>&1
-
-echo "Starting UX session at $(date)"
+echo "Starting uxwm session at $(date)"
 
 [ -f "$HOME/.Xresources" ] && xrdb -merge "$HOME/.Xresources"
 
-xset r rate 250 30
-xset s off
-xset -dpms
-
-if command -v "$UXCOMP" >/dev/null 2>&1; then
-    echo "Starting compositor..."
-    $UXCOMP &
-    sleep 0.5
+if command -v xset >/dev/null 2>&1; then
+    xset r rate 250 30 || true
+    xset s off || true
+    xset -dpms || true
 fi
 
-if command -v feh >/dev/null 2>&1 && [ -f "$HOME/.config/wallpaper" ]; then
-    echo "Setting wallpaper..."
-    feh --bg-scale "$HOME/.config/wallpaper" &
+if [ -x "$STATUS_SCRIPT" ]; then
+    echo "Running status hook..."
+    "$STATUS_SCRIPT" &
 fi
 
-{
-    while true; do
-        datetime=$(date '+%Y-%m-%d %H:%M')
-        
-        if [ -f /sys/class/power_supply/BAT0/capacity ]; then
-            battery="Bat: $(cat /sys/class/power_supply/BAT0/capacity)%"
-        else
-            battery=""
-        fi
-        
-        if command -v pactl >/dev/null 2>&1; then
-            volume=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\d+%' | head -1)
-            muted=$(pactl get-sink-mute @DEFAULT_SINK@ | grep -q yes && echo "M" || echo "V")
-            volume="$muted:$volume"
-        else
-            volume=""
-        fi
-        
-        cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
-        mem=$(free -h | grep Mem | awk '{print $3}')
-        
-        status="CPU: ${cpu}% | Mem: $mem | $volume | $battery | $datetime"
-        
-        xsetroot -name "$status"
-        sleep 5
-    done
-} &
-
-autostart="$HOME/.config/ux/autostart"
-if [ -f "$autostart" ]; then
-    echo "Running autostart script..."
-    sh "$autostart" &
+if [ -x "$AUTOSTART" ]; then
+    echo "Running autostart hook..."
+    "$AUTOSTART" &
 fi
 
 echo "Starting window manager..."
-exec $UXWM
+exec "$UXWM"

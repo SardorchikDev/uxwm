@@ -5,6 +5,7 @@
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
+#include <X11/XKBlib.h>
 #include <X11/Xlib.h>
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
@@ -26,7 +27,7 @@
 #define MOUSEMASK               (BUTTONMASK|PointerMotionMask)
 #define WIDTH(X)                ((X)->w + 2 * (X)->bw)
 #define HEIGHT(X)               ((X)->h + 2 * (X)->bw)
-#define TAGMASK                 ((1 << LENGTH(tags)) - 1)
+#define TAGMASK                 ((1u << num_tags) - 1u)
 #define TEXTW(X)                (drw_fontset_getwidth(drw, (X)) + lrpad)
 
 /* enums */
@@ -34,7 +35,11 @@ enum { CurNormal, CurResize, CurMove, CurLast };
 enum { SchemeNorm, SchemeSel };
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
-       NetWMWindowTypeDialog, NetClientList, NetLast };
+       NetWMWindowTypeDialog, NetWMWindowTypeUtility,
+       NetWMWindowTypeToolbar, NetWMWindowTypeSplash,
+       NetCloseWindow, NetClientList, NetClientListStacking,
+       NetCurrentDesktop, NetNumberOfDesktops, NetDesktopNames,
+       NetWMDesktop, NetLast };
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast };
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast };
@@ -130,7 +135,9 @@ extern char stext[256];
 /* config (defined in wm.c via config.h) */
 extern const char broken[];
 extern unsigned int borderpx;
+extern unsigned int gappx;
 extern unsigned int snap;
+extern int enablegaps;
 extern int showbar;
 extern int topbar;
 extern const char *fonts[];
@@ -180,6 +187,7 @@ long getstate(Window w);
 int gettextprop(Window w, Atom atom, char *text, unsigned int size);
 void grabbuttons(Client *c, int focused);
 void manage(Window w, XWindowAttributes *wa);
+int propcontainsatom(Client *c, Atom prop, Atom atom);
 void unmanage(Client *c, int destroyed);
 void resize(Client *c, int x, int y, int w, int h, int interact);
 void resizeclient(Client *c, int x, int y, int w, int h);
@@ -194,6 +202,11 @@ void showhide(Client *c);
 void updatebars(void);
 void updatebarpos(Monitor *m);
 void updateclientlist(void);
+void updateclientdesktop(Client *c);
+void updateclientliststacking(void);
+void updatecurrentdesktop(void);
+void updatedesktopnames(Atom utf8string);
+void updatenumdesktops(void);
 void updatesizehints(Client *c);
 void updatestatus(void);
 void updatetitle(Client *c);
@@ -206,6 +219,8 @@ void scan(void);
 void setup(void);
 void run(void);
 void cleanup(void);
+int xerrordummy(Display *d, XErrorEvent *ee);
+int xerror(Display *d, XErrorEvent *ee);
 Monitor *createmon(void);
 void cleanupmon(Monitor *m);
 Monitor *dirtomon(int dir);
@@ -232,6 +247,8 @@ void tag(const Arg *arg);
 void tagmon(const Arg *arg);
 void togglebar(const Arg *arg);
 void togglefloating(const Arg *arg);
+void togglegaps(const Arg *arg);
+void togglefullscreen(const Arg *arg);
 void toggletag(const Arg *arg);
 void toggleview(const Arg *arg);
 void view(const Arg *arg);

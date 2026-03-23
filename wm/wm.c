@@ -17,6 +17,7 @@ int screen;
 int sw, sh;
 int bh, lrpad;
 int running = 1;
+int enablegaps = 1;
 unsigned int numlockmask = 0;
 
 Display *dpy;
@@ -41,6 +42,17 @@ int num_layouts = LENGTH(layouts);
 int num_keys    = LENGTH(keys);
 int num_buttons = LENGTH(buttons);
 int num_rules   = LENGTH(rules);
+
+static unsigned long
+firsttagindex(unsigned int tagset)
+{
+	unsigned long i;
+
+	for (i = 0; i < (unsigned long)num_tags; i++)
+		if (tagset & (1u << i))
+			return i;
+	return 0;
+}
 
 /* ── built-in status updater ─────────────────────────────────────────────── */
 /*
@@ -122,6 +134,28 @@ getatomprop(Client *c, Atom prop)
 	return atom;
 }
 
+int
+propcontainsatom(Client *c, Atom prop, Atom atom)
+{
+	int format, found = 0;
+	unsigned long i, nitems, dl;
+	unsigned char *p = NULL;
+	Atom da;
+
+	if (XGetWindowProperty(dpy, c->win, prop, 0L, 64L, False, XA_ATOM,
+		&da, &format, &nitems, &dl, &p) == Success && p) {
+		if (da == XA_ATOM && format == 32) {
+			for (i = 0; i < nitems; i++)
+				if (((Atom *)p)[i] == atom) {
+					found = 1;
+					break;
+				}
+		}
+		XFree(p);
+	}
+	return found;
+}
+
 long
 getstate(Window w)
 {
@@ -155,9 +189,9 @@ gettextprop(Window w, Atom atom, char *text, unsigned int size)
 	} else if (XmbTextPropertyToTextList(dpy, &name, &list, &n) >= Success
 	           && n > 0 && *list) {
 		strncpy(text, *list, size - 1);
-		XFreeStringList(list);
 	}
 	text[size - 1] = '\0';
+	if (list) XFreeStringList(list);
 	XFree(name.value);
 	return 1;
 }
@@ -347,6 +381,7 @@ focus(Client *c)
 		XDeleteProperty(dpy, root, netatom[NetActiveWindow]);
 	}
 	selmon->sel = c;
+	updatecurrentdesktop();
 	drawbars();
 }
 
@@ -503,6 +538,7 @@ restack(Monitor *m)
 			}
 	}
 	XSync(dpy, False);
+	updateclientliststacking();
 	while (XCheckMaskEvent(dpy, EnterWindowMask, &ev));
 }
 
@@ -572,10 +608,10 @@ manage(Window w, XWindowAttributes *wa)
 		XRaiseWindow(dpy, c->win);
 	attach(c);
 	attachstack(c);
-	XChangeProperty(dpy, root, netatom[NetClientList], XA_WINDOW, 32, PropModeAppend,
-		(unsigned char *)&(c->win), 1);
 	XMoveResizeWindow(dpy, c->win, c->x + 2 * sw, c->y, c->w, c->h);
 	setclientstate(c, NormalState);
+	updateclientdesktop(c);
+	updateclientlist();
 	if (c->mon == selmon) unfocus(selmon->sel, 0);
 	c->mon->sel = c;
 	arrange(c->mon);
@@ -619,6 +655,7 @@ sendmon(Client *c, Monitor *m)
 	detachstack(c);
 	c->mon  = m;
 	c->tags = m->tagset[m->seltags];
+	updateclientdesktop(c);
 	attach(c);
 	attachstack(c);
 	focus(NULL);
@@ -681,6 +718,78 @@ updateclientlist(void)
 			XChangeProperty(dpy, root, netatom[NetClientList],
 				XA_WINDOW, 32, PropModeAppend,
 				(unsigned char *)&(c->win), 1);
+	updateclientliststacking();
+}
+
+void
+updateclientdesktop(Client *c)
+{
+	unsigned long desktop;
+
+	if (!c) return;
+	desktop = c->tags == TAGMASK ? 0xFFFFFFFFu : firsttagindex(c->tags);
+	XChangeProperty(dpy, c->win, netatom[NetWMDesktop], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)&desktop, 1);
+}
+
+void
+updateclientliststacking(void)
+{
+	unsigned int i, num;
+	Window d1, d2, *wins = NULL;
+
+	XDeleteProperty(dpy, root, netatom[NetClientListStacking]);
+	if (!XQueryTree(dpy, root, &d1, &d2, &wins, &num))
+		return;
+
+	for (i = 0; i < num; i++)
+		if (wintoclient(wins[i]))
+			XChangeProperty(dpy, root, netatom[NetClientListStacking],
+				XA_WINDOW, 32, PropModeAppend,
+				(unsigned char *)&wins[i], 1);
+	if (wins) XFree(wins);
+}
+
+void
+updatecurrentdesktop(void)
+{
+	unsigned long desktop = 0;
+
+	if (selmon)
+		desktop = firsttagindex(selmon->tagset[selmon->seltags]);
+	XChangeProperty(dpy, root, netatom[NetCurrentDesktop], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)&desktop, 1);
+}
+
+void
+updatedesktopnames(Atom utf8string)
+{
+	size_t i, len = 0, off = 0;
+	char *names;
+
+	for (i = 0; i < (size_t)num_tags; i++)
+		len += strlen(tags[i]) + 1;
+	if (!(names = ecalloc(MAX(len, 1), sizeof(char))))
+		return;
+
+	for (i = 0; i < (size_t)num_tags; i++) {
+		size_t taglen = strlen(tags[i]);
+
+		memcpy(names + off, tags[i], taglen);
+		off += taglen + 1;
+	}
+	XChangeProperty(dpy, root, netatom[NetDesktopNames], utf8string, 8,
+		PropModeReplace, (unsigned char *)names, (int)off);
+	free(names);
+}
+
+void
+updatenumdesktops(void)
+{
+	unsigned long desktops = num_tags;
+
+	XChangeProperty(dpy, root, netatom[NetNumberOfDesktops], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)&desktops, 1);
 }
 
 void
@@ -739,6 +848,7 @@ updatestatus(void)
 		strncpy(stext, tmp, sizeof(stext) - 1);
 	else
 		updatestatustext();
+	stext[sizeof(stext) - 1] = '\0';
 	drawbar(selmon);
 }
 
@@ -755,11 +865,14 @@ void
 updatewindowtype(Client *c)
 {
 	Atom state = getatomprop(c, netatom[NetWMState]);
-	Atom wtype = getatomprop(c, netatom[NetWMWindowType]);
 
-	if (state == netatom[NetWMFullscreen])
+	if (state == netatom[NetWMFullscreen]
+	|| propcontainsatom(c, netatom[NetWMState], netatom[NetWMFullscreen]))
 		setfullscreen(c, 1);
-	if (wtype == netatom[NetWMWindowTypeDialog])
+	if (propcontainsatom(c, netatom[NetWMWindowType], netatom[NetWMWindowTypeDialog])
+	|| propcontainsatom(c, netatom[NetWMWindowType], netatom[NetWMWindowTypeUtility])
+	|| propcontainsatom(c, netatom[NetWMWindowType], netatom[NetWMWindowTypeToolbar])
+	|| propcontainsatom(c, netatom[NetWMWindowType], netatom[NetWMWindowTypeSplash]))
 		c->isfloating = 1;
 }
 

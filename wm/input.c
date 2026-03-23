@@ -12,24 +12,20 @@ grabkeys(void)
 {
 	updatenumlockmask();
 	{
-		unsigned int i, j, k;
+		unsigned int i, j;
 		unsigned int modifiers[] = { 0, LockMask, numlockmask, numlockmask|LockMask };
-		int start, end, skip;
-		KeySym *syms;
+		KeyCode code;
 
 		XUngrabKey(dpy, AnyKey, AnyModifier, root);
-		XDisplayKeycodes(dpy, &start, &end);
-		syms = XGetKeyboardMapping(dpy, start, end - start + 1, &skip);
-		if (!syms) return;
-		for (k = start; k <= (unsigned int)end; k++)
-			for (i = 0; i < num_keys; i++)
-				if (keys[i].keysym == syms[(k - start) * skip])
-					for (j = 0; j < LENGTH(modifiers); j++)
-						XGrabKey(dpy, k,
-							keys[i].mod | modifiers[j],
-							root, True,
-							GrabModeAsync, GrabModeAsync);
-		XFree(syms);
+		for (i = 0; i < (unsigned int)num_keys; i++) {
+			if (!(code = XKeysymToKeycode(dpy, keys[i].keysym)))
+				continue;
+			for (j = 0; j < LENGTH(modifiers); j++)
+				XGrabKey(dpy, code,
+					keys[i].mod | modifiers[j],
+					root, True,
+					GrabModeAsync, GrabModeAsync);
+		}
 	}
 }
 
@@ -76,6 +72,14 @@ killclient(const Arg *arg)
 		XSetErrorHandler(xerror);
 		XUngrabServer(dpy);
 	}
+}
+
+void
+togglefullscreen(const Arg *arg)
+{
+	(void)arg;
+	if (!selmon->sel) return;
+	setfullscreen(selmon->sel, !selmon->sel->isfullscreen);
 }
 
 /* ── focus stack ─────────────────────────────────────────────────────────── */
@@ -173,6 +177,14 @@ togglefloating(const Arg *arg)
 	arrange(selmon);
 }
 
+void
+togglegaps(const Arg *arg)
+{
+	(void)arg;
+	enablegaps = !enablegaps;
+	arrange(selmon);
+}
+
 /* ── view (switch desktop) ───────────────────────────────────────────────── */
 /*
  * FIX: The original logic used a simple XOR on seltags which caused a
@@ -228,6 +240,7 @@ tag(const Arg *arg)
 {
 	if (selmon->sel && (arg->ui & TAGMASK)) {
 		selmon->sel->tags = arg->ui & TAGMASK;
+		updateclientdesktop(selmon->sel);
 		focus(NULL);
 		arrange(selmon);
 	}
@@ -241,6 +254,7 @@ toggletag(const Arg *arg)
 	newtags = selmon->sel->tags ^ (arg->ui & TAGMASK);
 	if (newtags) {
 		selmon->sel->tags = newtags;
+		updateclientdesktop(selmon->sel);
 		focus(NULL);
 		arrange(selmon);
 	}

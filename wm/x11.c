@@ -12,6 +12,62 @@
 /* defined in wm.c — writes current time into stext */
 void updatestatustext(void);
 
+static unsigned long
+firsttagindex(unsigned int tagset)
+{
+    unsigned long i;
+
+    for (i = 0; i < (unsigned long)num_tags; i++)
+        if (tagset & (1u << i))
+            return i;
+    return 0;
+}
+
+static unsigned int
+tagmaskfromdesktop(unsigned long desktop)
+{
+    return desktop < (unsigned long)num_tags ? (1u << desktop) : 0;
+}
+
+static void
+closeclient(Client *c)
+{
+    if (!c) return;
+    if (!sendevent(c, wmatom[WMDelete])) {
+        XGrabServer(dpy);
+        XSetErrorHandler(xerrordummy);
+        XSetCloseDownMode(dpy, DestroyAll);
+        XKillClient(dpy, c->win);
+        XSync(dpy, False);
+        XSetErrorHandler(xerror);
+        XUngrabServer(dpy);
+    }
+}
+
+static void
+activateclient(Client *c)
+{
+    Arg arg;
+
+    if (!c) return;
+    if (selmon->sel && selmon->sel->isfullscreen && lockfullscreen && c != selmon->sel) {
+        if (!c->isurgent)
+            seturgent(c, 1);
+        return;
+    }
+    if (c->mon != selmon) {
+        unfocus(selmon->sel, 0);
+        selmon = c->mon;
+    }
+    if (!ISVISIBLE(c)) {
+        arg.ui = tagmaskfromdesktop(firsttagindex(c->tags));
+        if (arg.ui)
+            view(&arg);
+    }
+    focus(c);
+    restack(selmon);
+}
+
 /* ── event handler forward declarations ─────────────────────────────────── */
 static void on_buttonpress(XEvent *e);
 static void on_clientmessage(XEvent *e);
@@ -171,8 +227,9 @@ wintomon(Window w)
 void
 updatenumlockmask(void)
 {
-    unsigned int i, j;
+    int i, j;
     XModifierKeymap *modmap = XGetModifierMapping(dpy);
+    if (!modmap) return;
     numlockmask = 0;
     for (i = 0; i < 8; i++)
         for (j = 0; j < modmap->max_keypermod; j++)
@@ -341,6 +398,14 @@ on_clientmessage(XEvent *e)
 {
     XClientMessageEvent *cme = &e->xclient;
     Client *c = wintoclient(cme->window);
+
+    if (cme->message_type == netatom[NetCurrentDesktop] && cme->window == root) {
+        Arg arg = { .ui = tagmaskfromdesktop((unsigned long)cme->data.l[0]) };
+
+        if (arg.ui)
+            view(&arg);
+        return;
+    }
     if (!c) return;
     if (cme->message_type == netatom[NetWMState]) {
         if (cme->data.l[1] == (long)netatom[NetWMFullscreen]
@@ -348,7 +413,23 @@ on_clientmessage(XEvent *e)
             setfullscreen(c, cme->data.l[0] == 1
                 || (cme->data.l[0] == 2 && !c->isfullscreen));
     } else if (cme->message_type == netatom[NetActiveWindow]) {
-        if (c != selmon->sel && !c->isurgent) seturgent(c, 1);
+        activateclient(c);
+    } else if (cme->message_type == netatom[NetWMDesktop]) {
+        unsigned long desktop = (unsigned long)cme->data.l[0];
+        unsigned int tags;
+
+        if (desktop == 0xFFFFFFFFu)
+            tags = TAGMASK;
+        else if (!(tags = tagmaskfromdesktop(desktop)))
+            return;
+        c->tags = tags;
+        updateclientdesktop(c);
+        if (c == c->mon->sel && !ISVISIBLE(c))
+            c->mon->sel = NULL;
+        focus(NULL);
+        arrange(NULL);
+    } else if (cme->message_type == netatom[NetCloseWindow]) {
+        closeclient(c);
     }
 }
 
@@ -385,7 +466,7 @@ on_configurerequest(XEvent *e)
     if ((c = wintoclient(ev->window))) {
         if (ev->value_mask & CWBorderWidth) {
             c->bw = ev->border_width;
-        } else if (c->isfloating || !selmon->lt[selmon->sellt]->arrange) {
+        } else if (c->isfloating || !c->mon->lt[c->mon->sellt]->arrange) {
             m = c->mon;
             if (ev->value_mask & CWX)      { c->oldx = c->x; c->x = m->mx + ev->x; }
             if (ev->value_mask & CWY)      { c->oldy = c->y; c->y = m->my + ev->y; }
@@ -453,7 +534,7 @@ static void
 on_keypress(XEvent *e)
 {
     unsigned int i;
-    KeySym ks = XKeycodeToKeysym(dpy, (KeyCode)e->xkey.keycode, 0);
+    KeySym ks = XkbKeycodeToKeysym(dpy, (KeyCode)e->xkey.keycode, 0, 0);
     for (i = 0; i < (unsigned int)num_keys; i++)
         if (ks == keys[i].keysym
         && CLEANMASK(keys[i].mod) == CLEANMASK(e->xkey.state)
@@ -570,7 +651,16 @@ setup(void)
     netatom[NetWMFullscreen]       = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN",   False);
     netatom[NetWMWindowType]       = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE",        False);
     netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
+    netatom[NetWMWindowTypeUtility]= XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_UTILITY",False);
+    netatom[NetWMWindowTypeToolbar]= XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_TOOLBAR",False);
+    netatom[NetWMWindowTypeSplash] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_SPLASH", False);
+    netatom[NetCloseWindow]        = XInternAtom(dpy, "_NET_CLOSE_WINDOW",          False);
     netatom[NetClientList]         = XInternAtom(dpy, "_NET_CLIENT_LIST",           False);
+    netatom[NetClientListStacking] = XInternAtom(dpy, "_NET_CLIENT_LIST_STACKING",  False);
+    netatom[NetCurrentDesktop]     = XInternAtom(dpy, "_NET_CURRENT_DESKTOP",       False);
+    netatom[NetNumberOfDesktops]   = XInternAtom(dpy, "_NET_NUMBER_OF_DESKTOPS",    False);
+    netatom[NetDesktopNames]       = XInternAtom(dpy, "_NET_DESKTOP_NAMES",         False);
+    netatom[NetWMDesktop]          = XInternAtom(dpy, "_NET_WM_DESKTOP",            False);
 
     cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
     cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -594,6 +684,10 @@ setup(void)
     XChangeProperty(dpy, root, netatom[NetSupported], XA_ATOM, 32,
         PropModeReplace, (unsigned char *)netatom, NetLast);
     XDeleteProperty(dpy, root, netatom[NetClientList]);
+    XDeleteProperty(dpy, root, netatom[NetClientListStacking]);
+    updatenumdesktops();
+    updatedesktopnames(utf8string);
+    updatecurrentdesktop();
 
     wa.cursor     = cursor[CurNormal]->cursor;
     wa.event_mask = SubstructureRedirectMask | SubstructureNotifyMask
